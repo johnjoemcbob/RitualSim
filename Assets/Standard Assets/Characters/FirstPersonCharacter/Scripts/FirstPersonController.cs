@@ -60,7 +60,9 @@ namespace UnityStandardAssets.Characters.FirstPerson
 				Transform head = transform.GetChild( 0 );
 				m_Camera.transform.position = head.position;
 				m_Camera.transform.parent = head;
-				head.GetChild( 0 ).GetComponent<Renderer>().enabled = false;
+				GameObject headvisual = head.GetChild( 0 ).gameObject;
+				headvisual.GetComponent<Renderer>().enabled = false;
+				headvisual.transform.parent = m_Camera.transform;
 
 				// Attach armature to the player's camera
 				foreach ( Transform child in transform.GetComponentsInChildren<Transform>() )

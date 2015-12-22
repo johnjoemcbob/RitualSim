@@ -265,7 +265,10 @@ namespace UnityStandardAssets.Characters.FirstPerson
 
         private void RotateView()
         {
-            m_MouseLook.LookRotation (transform, m_Camera.transform);
+			if ( !Input.GetKey( KeyCode.LeftControl ) )
+			{
+				m_MouseLook.LookRotation( transform, m_Camera.transform );
+			}
         }
 
 

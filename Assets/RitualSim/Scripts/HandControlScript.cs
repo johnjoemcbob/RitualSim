@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.Networking;
+using UnityStandardAssets.Characters.FirstPerson;
 using System.Collections;
 
 public class HandControlScript : NetworkBehaviour
@@ -10,6 +11,7 @@ public class HandControlScript : NetworkBehaviour
 	public float ThrowForce = 1000;
 	public GameObject[] Hands;
 	public GameObject[] PhysicalHands;
+	[SerializeField] private MouseLook MouseLook_CameraLocked;
 
 	private float[] HandTargetAngles = { 0, 0 };
 	private Vector3[] HandTargetPositions = { new Vector3( 0, 0, 0 ), new Vector3( 0, 0, 0 ) };
@@ -22,13 +24,21 @@ public class HandControlScript : NetworkBehaviour
 	{
 		if ( !isLocalPlayer ) return;
 
-		Hands[0] = Camera.main.transform.GetChild( 0 ).GetChild( 0 ).gameObject;
-		Hands[1] = Camera.main.transform.GetChild( 1 ).GetChild( 0 ).gameObject;
+		Hands[0] = Camera.main.transform.GetChild( 0 ).transform.GetChild( 0 ).GetChild( 0 ).GetChild( 0 ).gameObject;
+		Hands[1] = Camera.main.transform.GetChild( 0 ).transform.GetChild( 0 ).GetChild( 1 ).GetChild( 0 ).gameObject;
+
+		// Setup the arm mouse movement for the locked camera
+		Transform armshorizontal = Camera.main.transform.GetChild( 0 );
+		Transform armsvertical = armshorizontal.GetChild( 0 );
+		MouseLook_CameraLocked.Init( armshorizontal, armsvertical );
 	}
 
 	void Update()
 	{
 		if ( !isLocalPlayer ) return;
+
+		// Update the camera locked hand positions
+		UpdateCameraLock();
 
 		// Update positioning (i.e. move hands from down-side to front-center)
 		UpdateHand( 0, KeyCode.Q, new Vector3( 0.15f, 0.22f, 1 ) );
@@ -45,18 +55,59 @@ public class HandControlScript : NetworkBehaviour
 		LastEyeAngles = transform.eulerAngles;
 	}
 
+	void UpdateCameraLock()
+	{
+		Transform armshorizontal = Camera.main.transform.GetChild( 0 );
+		Transform armsvertical = armshorizontal.GetChild( 0 );
+
+		// When first pressed, inherit current rotation of hands (for catching them mid lerp)
+		if ( Input.GetKeyDown( KeyCode.LeftControl ) )
+		{
+			MouseLook_CameraLocked.m_CharacterTargetRot = armshorizontal.localRotation;
+			MouseLook_CameraLocked.m_CameraTargetRot = armsvertical.localRotation;
+		}
+
+		// If locked; rotate with mouse
+		bool cameralocked = Input.GetKey( KeyCode.LeftControl );
+		if ( cameralocked )
+		{
+			MouseLook_CameraLocked.LookRotation( armshorizontal, armsvertical );
+		}
+		// Otherwise lerp back to the default angles
+		else
+		{
+			armshorizontal.localRotation = Quaternion.Lerp( armshorizontal.localRotation, Quaternion.Euler( 0, 0, 0 ), Smoothing * Time.deltaTime );
+			armsvertical.localRotation = Quaternion.Lerp( armsvertical.localRotation, Quaternion.Euler( 0, 0, 0 ), Smoothing * Time.deltaTime );
+			MouseLook_CameraLocked.m_CharacterTargetRot.Set( 0, 0, 0, 1 );
+			MouseLook_CameraLocked.m_CameraTargetRot.Set( 0, 0, 0, 1 );
+		}
+	}
+
 	void UpdateHand( int hand, KeyCode key, Vector3 position )
 	{
 		// Input for raising and lowering hands
-		if ( Input.GetKey( key ) )
+		//if ( Input.GetKey( key ) )
+		//{
+		//	HandTargetAngles[hand] = 90;
+		//	HandTargetPositions[hand] = position;
+		//}
+		//else
+		//{
+		//	HandTargetAngles[hand] = 0;
+		//	HandTargetPositions[hand] = new Vector3( 0, 0, 0 );
+		//}
+		if ( Input.GetKeyDown( key ) )
 		{
-			HandTargetAngles[hand] = 90;
-			HandTargetPositions[hand] = position;
-		}
-		else
-		{
-			HandTargetAngles[hand] = 0;
-			HandTargetPositions[hand] = new Vector3( 0, 0, 0 );
+			if ( HandTargetAngles[hand] == 0 )
+			{
+				HandTargetAngles[hand] = 90;
+				HandTargetPositions[hand] = position;
+			}
+			else
+			{
+				HandTargetAngles[hand] = 0;
+				HandTargetPositions[hand] = new Vector3( 0, 0, 0 );
+			}
 		}
 
 		// Set the sockets new position, for the physical hands to lerp towards
@@ -67,7 +118,7 @@ public class HandControlScript : NetworkBehaviour
 		float dif = mod( LastEyeAngles.y - transform.eulerAngles.y + 180, 360 ) - 180;
 		PhysicalHands[hand].transform.position = Vector3.Lerp(
 			PhysicalHands[hand].transform.position,
-			Hands[hand].transform.position + ( transform.right * dif / 50 ),
+			Hands[hand].transform.position + ( transform.right * dif / 20 ),
 			Smoothing * Time.deltaTime
 		);
 
@@ -83,9 +134,13 @@ public class HandControlScript : NetworkBehaviour
 	void UpdateInteraction( int hand, ref GameObject heldobject )
 	{
 		// Only send the command when the state of holding changes
-		//if ( Input.GetMouseButtonDown( hand ) || Input.GetMouseButtonUp( hand ) )
+		if ( Input.GetMouseButtonDown( hand ) || Input.GetMouseButtonUp( hand ) )
 		{
-			Cmd_UpdateInteraction( hand, Input.GetMouseButton( hand ), heldobject );
+			// Send to server for proper outcome
+			if ( !isServer )
+			{
+				Cmd_UpdateInteraction( hand, Input.GetMouseButton( hand ), heldobject );
+			}
 			UpdateInteraction_PickupDrop( hand, Input.GetMouseButton( hand ), ref heldobject );
 		}
 	}
@@ -132,6 +187,7 @@ public class HandControlScript : NetworkBehaviour
 
 				// Remove gravity
 				hit.transform.GetComponent<Rigidbody>().useGravity = false;
+				hit.transform.GetComponent<Rigidbody>().isKinematic = true;
 			}
 		}
 		else if ( heldobject )
@@ -141,6 +197,7 @@ public class HandControlScript : NetworkBehaviour
 			{
 				// Enable gravity
 				heldobject.transform.GetComponent<Rigidbody>().useGravity = true;
+				heldobject.transform.GetComponent<Rigidbody>().isKinematic = false;
 
 				// Unparent
 				heldobject.transform.parent = null;
